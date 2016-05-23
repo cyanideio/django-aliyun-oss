@@ -3,7 +3,7 @@ django-aliyun-oss
 
 Django backends storages for Aliyun OSS
 
-嵌入了Aliyun OSS Python SDK开发包 0.3.2
+嵌入了Aliyun OSS Python SDK开发包 0.4.6
 
 =================
 配置说明：
