@@ -1,45 +1,23 @@
 #!/usr/bin/env python
 #coding=utf-8
 
-# Copyright (c) 2011, Alibaba Cloud Computing
-# All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the
-# "Software"), to deal in the Software without restriction, including
-# without limitation the rights to use, copy, modify, merge, publish, dis-
-# tribute, sublicense, and/or sell copies of the Software, and to permit
-# persons to whom the Software is furnished to do so, subject to the fol-
-# lowing conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABIL-
-# ITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-# SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-# WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-# IN THE SOFTWARE.
+# Copyright (C) 2011, Alibaba Cloud Computing
 
-import http.client
-import time
-import base64
-import urllib.request, urllib.parse, urllib.error
-import io
-import sys
-import logging
-try:
-    from aliyun_oss.oss.oss_util import *
-except:
-    from aliyun_oss.oss.oss_util import *
-try:
-    from aliyun_oss.oss.oss_xml_handler import *
-except:
-    from aliyun_oss.oss.oss_xml_handler import *
+#Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-logger = logging.getLogger(__name__)
+#The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+import httplib
+try:
+    from oss.oss_util import *
+except:
+    from oss_util import *
+try:
+    from oss.oss_xml_handler import *
+except:
+    from oss_xml_handler import *
 
 class OssAPI:
     '''
@@ -47,26 +25,35 @@ class OssAPI:
     '''
     DefaultContentType = 'application/octet-stream'
     provider = PROVIDER
-    __version__ = '0.3.2'
+    __version__ = '0.4.6'
     Version = __version__
-    AGENT = 'oss-python%s (%s)' % (__version__, sys.platform)
+    AGENT = 'aliyun-sdk-python/%s (%s/%s/%s;%s)' % (__version__, platform.system(), platform.release(), platform.machine(), platform.python_version())
 
-    def __init__(self, host, access_id, secret_access_key='', port=80, is_security=False):
+    def __init__(self, host='oss.aliyuncs.com', access_id='', secret_access_key='', port=80, is_security=False, sts_token=None):
         self.SendBufferSize = 8192
         self.RecvBufferSize = 1024*1024*10
-        self.host = get_second_level_domain(host)
+        self.host = get_host_from_list(host)
         self.port = port
         self.access_id = access_id
         self.secret_access_key = secret_access_key
         self.show_bar = False
         self.is_security = is_security
-        self.retry_times = 5
+        self.retry_times = 5 
         self.agent = self.AGENT
         self.debug = False
+        self.timeout = 60
+        self.is_oss_domain = False
+        self.sts_token = sts_token
+
+    def set_timeout(self, timeout):
+        self.timeout = timeout
 
     def set_debug(self, is_debug):
         if is_debug:
-            self.debug = True
+            self.debug = True 
+
+    def set_user_agent(self, user_agent):
+        self.agent = user_agent
 
     def set_retry_times(self, retry_times=5):
         self.retry_times = retry_times
@@ -83,14 +70,17 @@ class OssAPI:
         except ValueError:
             pass
 
+    def set_is_oss_host(self, is_oss_host=False):
+        if is_oss_host:
+            self.is_oss_domain = True
+        else:
+            self.is_oss_domain = False
+    
     def get_connection(self, tmp_host=None):
         host = ''
         port = 80
-        timeout = 10
         if not tmp_host:
             tmp_host = self.host
-        if isinstance(tmp_host, bytes):
-            tmp_host = tmp_host.decode()
         host_port_list = tmp_host.split(":")
         if len(host_port_list) == 1:
             host = host_port_list[0].strip()
@@ -100,14 +90,14 @@ class OssAPI:
         if self.is_security or port == 443:
             self.is_security = True
             if sys.version_info >= (2, 6):
-                return http.client.HTTPSConnection(host=host, port=port, timeout=timeout)
+                return httplib.HTTPSConnection(host=host, port=port, timeout=self.timeout)
             else:
-                return http.client.HTTPSConnection(host=host, port=port)
+                return httplib.HTTPSConnection(host=host, port=port)
         else:
             if sys.version_info >= (2, 6):
-                return http.client.HTTPConnection(host=host, port=port, timeout=timeout)
+                return httplib.HTTPConnection(host=host, port=port, timeout=self.timeout)
             else:
-                return http.client.HTTPConnection(host=host, port=port)
+                return httplib.HTTPConnection(host=host, port=port)
 
     def sign_url_auth_with_expire_time(self, method, url, headers=None, resource="/", timeout=60, params=None):
         '''
@@ -137,7 +127,6 @@ class OssAPI:
             params = {}
         send_time = str(int(time.time()) + timeout)
         headers['Date'] = send_time
-        # logger.debug('***find bytes 1*** {}'.format(resource))
         auth_value = get_assign(self.secret_access_key, method, headers, resource, None, self.debug)
         params["OSSAccessKeyId"] = self.access_id
         params["Expires"] = str(send_time)
@@ -179,25 +168,26 @@ class OssAPI:
             params = {}
         send_time = str(int(time.time()) + timeout)
         headers['Date'] = send_time
-        if isinstance(object, bytes):
-            object = object.decode('utf-8')
+        object = convert_utf8(object)
         resource = "/%s/%s%s" % (bucket, object, get_resource(params))
-        # logger.debug('***find bytes 2*** {}'.format(resource))
         auth_value = get_assign(self.secret_access_key, method, headers, resource, None, self.debug)
         params["OSSAccessKeyId"] = self.access_id
         params["Expires"] = str(send_time)
         params["Signature"] = auth_value
         url = ''
+        object = oss_quote(object)
+        http = "http"
         if self.is_security:
-            if is_ip(self.host):
-                url = "https://%s/%s/%s" % (self.host, bucket, object)
+            http = "https"
+        if is_ip(self.host):
+            url = "%s://%s/%s/%s" % (http, self.host, bucket, object)
+        elif is_oss_host(self.host, self.is_oss_domain):
+            if check_bucket_valid(bucket):
+                url = "%s://%s.%s/%s" % (http, bucket, self.host, object)
             else:
-                url = "https://%s.%s/%s" % (bucket, self.host, object)
+                url = "%s://%s/%s/%s" % (http, self.host, bucket, object)
         else:
-            if is_ip(self.host):
-                url = "http://%s/%s/%s" % (self.host, bucket, object)
-            else:
-                url = "http://%s.%s/%s" % (bucket, self.host, object)
+            url = "%s://%s/%s" % (http, self.host, object)
         sign_url = append_param(url, params)
         return sign_url
 
@@ -219,7 +209,6 @@ class OssAPI:
         Returns:
             signature string
         '''
-        # logger.debug('***find bytes 3*** {}'.format(resource))
         auth_value = "%s %s:%s" % (self.provider, self.access_id, get_assign(self.secret_access_key, method, headers, resource, None, self.debug))
         return auth_value
 
@@ -265,12 +254,12 @@ class OssAPI:
                 tmp_params = params.copy()
 
             res = self.http_request_with_redirect(method, tmp_bucket, tmp_object, tmp_headers, body, tmp_params)
-            if res.status == 301 or res.status == 302:
+            if check_redirect(res):
                 self.host = helper_get_host_from_resp(res, bucket)
             else:
                 return res
         return res
-
+        
     def http_request_with_redirect(self, method, bucket, object, headers=None, body='', params=None):
         '''
         Send http request of operation
@@ -293,22 +282,24 @@ class OssAPI:
         Returns:
             HTTP Response
         '''
-
         if not params:
             params = {}
         if not headers:
             headers = {}
-        if isinstance(object, bytes):
-            object = object.decode('utf-8')
+        if self.sts_token:
+            headers['x-oss-security-token'] = self.sts_token
+        object = convert_utf8(object)
         if not bucket:
             resource = "/"
             headers['Host'] = self.host
         else:
             headers['Host'] = "%s.%s" % (bucket, self.host)
+            if not is_oss_host(self.host, self.is_oss_domain):
+                headers['Host'] = self.host
             resource = "/%s/" % bucket
-        # logger.debug('http_request_with_redirect: resource: {}, object: {}, get_resource(params): {}'.format(resource, object, get_resource(params)))
+        resource = convert_utf8(resource)
         resource = "%s%s%s" % (resource, object, get_resource(params))
-        object = urllib.parse.quote(object)
+        object = oss_quote(object)
         url = "/%s" % object
         if is_ip(self.host):
             url = "/%s/%s" % (bucket, object)
@@ -318,9 +309,8 @@ class OssAPI:
         url = append_param(url, params)
         date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime())
         headers['Date'] = date
-        # logger.debug("headers['Authorization']: method: {}, headers: {}, resource: {}".format(method, headers, resource))
         headers['Authorization'] = self._create_sign_for_normal_auth(method, headers, resource)
-        headers['User-Agent'] = self.agent
+        headers['User-Agent'] = self.agent 
         if check_bucket_valid(bucket) and not is_ip(self.host):
             conn = self.get_connection(headers['Host'])
         else:
@@ -328,18 +318,18 @@ class OssAPI:
         conn.request(method, url, body, headers)
         return conn.getresponse()
 
-    def get_service(self, headers=None):
+    def get_service(self, headers=None, prefix='', marker='', maxKeys=''):
         '''
         List all buckets of user
         '''
-        return self.list_all_my_buckets(headers)
+        return self.list_all_my_buckets(headers, prefix, marker, maxKeys)
 
-    def list_all_my_buckets(self, headers=None):
+    def list_all_my_buckets(self, headers=None, prefix='', marker='', maxKeys=''):
         '''
         List all buckets of user
         type headers: dict
         :param
-
+        
         Returns:
             HTTP Response
         '''
@@ -348,6 +338,12 @@ class OssAPI:
         object = ''
         body = ''
         params = {}
+        if prefix != '':
+            params['prefix'] = prefix
+        if marker != '':
+            params['marker'] = marker
+        if maxKeys != '':
+            params['max-keys'] = maxKeys
         return self.http_request(method, bucket, object, headers, body, params)
 
     def get_bucket_acl(self, bucket):
@@ -380,13 +376,13 @@ class OssAPI:
         params['location'] = ''
         return self.http_request(method, bucket, object, headers, body, params)
 
-    def get_bucket(self, bucket, prefix='', marker='', delimiter='', maxkeys='', headers=None):
+    def get_bucket(self, bucket, prefix='', marker='', delimiter='', maxkeys='', headers=None, encoding_type=''):
         '''
         List object that in bucket
         '''
-        return self.list_bucket(bucket, prefix, marker, delimiter, maxkeys, headers)
+        return self.list_bucket(bucket, prefix, marker, delimiter, maxkeys, headers, encoding_type)
 
-    def list_bucket(self, bucket, prefix='', marker='', delimiter='', maxkeys='', headers=None):
+    def list_bucket(self, bucket, prefix='', marker='', delimiter='', maxkeys='', headers=None, encoding_type=''):
         '''
         List object that in bucket
 
@@ -408,6 +404,9 @@ class OssAPI:
         :type headers: dict
         :param: HTTP header
 
+        :type maxkeys: string
+        :encoding_type
+
         Returns:
             HTTP Response
         '''
@@ -419,6 +418,75 @@ class OssAPI:
         params['marker'] = marker
         params['delimiter'] = delimiter
         params['max-keys'] = maxkeys
+        params['encoding-type'] = encoding_type
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def get_website(self, bucket, headers=None):
+        '''
+        Get bucket website
+
+        :type bucket: string
+        :param
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'GET'
+        object = ''
+        body = ''
+        params = {}
+        params['website'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def get_lifecycle(self, bucket, headers=None):
+        '''
+        Get bucket lifecycle
+
+        :type bucket: string
+        :param
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'GET'
+        object = ''
+        body = ''
+        params = {}
+        params['lifecycle'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def get_logging(self, bucket, headers=None):
+        '''
+        Get bucket logging
+
+        :type bucket: string
+        :param
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'GET'
+        object = ''
+        body = ''
+        params = {}
+        params['logging'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def get_cors(self, bucket, headers=None):
+        '''
+        Get bucket cors
+
+        :type bucket: string
+        :param
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'GET'
+        object = ''
+        body = ''
+        params = {}
+        params['cors'] = ''
         return self.http_request(method, bucket, object, headers, body, params)
 
     def create_bucket(self, bucket, acl='', headers=None):
@@ -454,6 +522,109 @@ class OssAPI:
         object = ''
         body = ''
         params = {}
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def put_logging(self, sourcebucket, targetbucket, prefix):
+        '''
+        Put bucket logging
+
+        :type sourcebucket: string
+        :param 
+
+        :type targetbucket: string
+        :param: Specifies the bucket where you want Aliyun OSS to store server access logs
+
+        :type prefix: string
+        :param: This element lets you specify a prefix for the objects that the log files will be stored
+
+        Returns:
+            HTTP Response
+        '''
+        body = '<BucketLoggingStatus>'
+        if targetbucket:
+            body += '<LoggingEnabled>'
+            body += '<TargetBucket>%s</TargetBucket>' % convert_utf8(targetbucket)
+            if prefix:
+                body += '<TargetPrefix>%s</TargetPrefix>' % convert_utf8(prefix)
+            body += '</LoggingEnabled>'
+        body += '</BucketLoggingStatus>'
+        method = 'PUT'
+        object = ''
+        params = {}
+        headers = {}
+        params['logging'] = ''
+        return self.http_request(method, sourcebucket, object, headers, body, params)
+
+    def put_website(self, bucket, indexfile, errorfile):
+        '''
+        Put bucket website
+
+        :type bucket: string
+        :param
+
+        :type indexfile: string
+        :param: the object that contain index page
+
+        :type errorfile: string
+        :param: the object taht contain error page
+
+        Returns:
+            HTTP Response
+        '''
+        indexfile = convert_utf8(indexfile)
+        errorfile = convert_utf8(errorfile)
+        body = '<WebsiteConfiguration><IndexDocument><Suffix>%s</Suffix></IndexDocument><ErrorDocument><Key>%s</Key></ErrorDocument></WebsiteConfiguration>' % (indexfile, errorfile)
+        method = 'PUT'
+        object = ''
+        headers = {}
+        params = {}
+        params['website'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def put_lifecycle(self, bucket, lifecycle):
+        '''
+        Put bucket lifecycle
+
+        :type bucket: string
+        :param
+
+        :type lifecycle: string
+        :param: lifecycle configuration
+
+        Returns:
+            HTTP Response
+        '''
+        body = lifecycle
+        method = 'PUT'
+        object = ''
+        headers = {}
+        params = {}
+        params['lifecycle'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def put_cors(self, bucket, cors_xml, headers=None):
+        '''
+        Put bucket cors
+
+        :type bucket: string
+        :param
+
+        :type cors_xml: string
+        :param: the xml that contain cors rules 
+
+        Returns:
+            HTTP Response
+        '''
+        body = cors_xml
+        method = 'PUT'
+        object = ''
+        if not headers:
+            headers = {}
+        headers['Content-Length'] = str(len(body))
+        base64md5 = get_string_base64_md5(body)
+        headers['Content-MD5'] = base64md5
+        params = {}
+        params['cors'] = ''
         return self.http_request(method, bucket, object, headers, body, params)
 
     def put_bucket_with_location(self, bucket, acl='', location='', headers=None):
@@ -510,13 +681,81 @@ class OssAPI:
         params = {}
         return self.http_request(method, bucket, object, headers, body, params)
 
-    def put_object_with_data(self, bucket, object, input_content, content_type=DefaultContentType, headers=None, params=None):
+    def delete_website(self, bucket, headers=None):
+        '''
+        Delete bucket website
+
+        :type bucket: string
+        :param
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'DELETE'
+        object = ''
+        body = ''
+        params = {}
+        params['website'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def delete_lifecycle(self, bucket, headers=None):
+        '''
+        Delete bucket lifecycle
+
+        :type bucket: string
+        :param
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'DELETE'
+        object = ''
+        body = ''
+        params = {}
+        params['lifecycle'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def delete_logging(self, bucket, headers=None):
+        '''
+        Delete bucket logging
+
+        :type bucket: string
+        :param:
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'DELETE'
+        object = ''
+        body = ''
+        params = {}
+        params['logging'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def delete_cors(self, bucket, headers=None):
+        '''
+        Delete bucket cors 
+
+        :type bucket: string
+        :param:
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'DELETE'
+        object = ''
+        body = ''
+        params = {}
+        params['cors'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def put_object_with_data(self, bucket, object, input_content, content_type='', headers=None, params=None):
         '''
         Put object into bucket, the content of object is from input_content
         '''
         return self.put_object_from_string(bucket, object, input_content, content_type, headers, params)
 
-    def put_object_from_string(self, bucket, object, input_content, content_type=DefaultContentType, headers=None, params=None):
+    def put_object_from_string(self, bucket, object, input_content, content_type='', headers=None, params=None):
         '''
         Put object into bucket, the content of object is from input_content
 
@@ -538,16 +777,51 @@ class OssAPI:
         Returns:
             HTTP Response
         '''
+        method = "PUT"
+        return self._put_or_post_object_from_string(method, bucket, object, input_content, content_type, headers, params)
+
+    def post_object_from_string(self, bucket, object, input_content, content_type='', headers=None, params=None):
+        '''
+        Post object into bucket, the content of object is from input_content
+
+        :type bucket: string
+        :param
+
+        :type object: string
+        :param
+
+        :type input_content: string
+        :param
+
+        :type content_type: string
+        :param: the object content type that supported by HTTP
+
+        :type headers: dict
+        :param: HTTP header
+
+        Returns:
+            HTTP Response
+        '''
+        method = "POST"
+        return self._put_or_post_object_from_string(method, bucket, object, input_content, content_type, headers, params)
+
+    def _put_or_post_object_from_string(self, method, bucket, object, input_content, content_type, headers, params):
         if not headers:
             headers = {}
-        headers['Content-Type'] = content_type
+        if not content_type:
+            content_type = get_content_type_by_filename(object)
+        if not headers.has_key('Content-Type') and not headers.has_key('content-type'):
+            headers['Content-Type'] = content_type
         headers['Content-Length'] = str(len(input_content))
-        fp = io.StringIO(input_content)
-        res = self.put_object_from_fp(bucket, object, fp, content_type, headers, params)
+        fp = StringIO.StringIO(input_content)
+        if "POST" == method:
+            res = self.post_object_from_fp(bucket, object, fp, content_type, headers, params)
+        else:
+            res = self.put_object_from_fp(bucket, object, fp, content_type, headers, params)
         fp.close()
         return res
 
-    def _open_conn_to_put_object(self, bucket, object, filesize, content_type=DefaultContentType, headers=None, params=None):
+    def _open_conn_to_put_object(self, method, bucket, object, filesize, content_type=DefaultContentType, headers=None, params=None):
         '''
         NOT public API
         Open a connectioon to put object
@@ -577,18 +851,21 @@ class OssAPI:
             params = {}
         if not headers:
             headers = {}
-        method = 'PUT'
-        if isinstance(object, bytes):
-            object = object.decode('utf-8')
+        if self.sts_token:
+            headers['x-oss-security-token'] = self.sts_token
+        object = convert_utf8(object)
         resource = "/%s/" % bucket
         if not bucket:
             resource = "/"
+        resource = convert_utf8(resource)
         resource = "%s%s%s" % (resource, object, get_resource(params))
 
-        object = urllib.parse.quote(object)
+        object = oss_quote(object)
         url = "/%s" % object
         if bucket:
             headers['Host'] = "%s.%s" % (bucket, self.host)
+            if not is_oss_host(self.host, self.is_oss_domain):
+                headers['Host'] = self.host
         else:
             headers['Host'] = self.host
         if is_ip(self.host):
@@ -602,14 +879,14 @@ class OssAPI:
         else:
             conn = self.get_connection()
         conn.putrequest(method, url)
-        if isinstance(content_type, bytes):
-            content_type = content_type.decode('utf-8')
-        headers["Content-Type"] = content_type
+        content_type = convert_utf8(content_type)
+        if not headers.has_key('Content-Type') and not headers.has_key('content-type'):
+            headers['Content-Type'] = content_type
         headers["Content-Length"] = filesize
         headers["Date"] = date
         headers["Expect"] = "100-Continue"
-        headers['User-Agent'] = self.agent
-        for k in list(headers.keys()):
+        headers['User-Agent'] = self.agent 
+        for k in headers.keys():
             conn.putheader(str(k), str(headers[k]))
         if '' != self.secret_access_key and '' != self.access_id:
             auth = self._create_sign_for_normal_auth(method, headers, resource)
@@ -646,11 +923,124 @@ class OssAPI:
         fp.close()
         return res
 
+    def append_object_from_string(self, bucket, object, position, content, content_type='', headers=None):
+        '''
+        Append content into object, the append content of object is from input_content
+
+        :type bucket: string
+        :param
+
+        :type object: string
+        :param
+
+        :type position: int
+        :param: append start position
+
+        :type input_content: string
+        :param
+
+        :type content_type: string
+        :param: the object content type that supported by HTTP
+
+        :type headers: dict
+        :param: HTTP header
+
+        Returns:
+            HTTP Response
+        '''
+        if not headers:
+            headers = {}
+        if not content_type:
+            content_type = get_content_type_by_filename(object)
+        if not headers.has_key('Content-Type') and not headers.has_key('content-type'):
+            headers['Content-Type'] = content_type
+        headers['Content-Length'] = str(len(content))
+
+        params = {}
+        params['append'] = ''
+        params['position'] = str(position)
+
+        method = 'POST'
+        conn = self._open_conn_to_put_object(method, bucket, object, len(content), content_type, headers, params)
+        conn.send(content)
+
+        return conn.getresponse()
+
+    def append_object_from_file(self, bucket, object, position, filename, content_type='', headers=None):
+        '''
+        Append content into object, the content of object is read from file
+
+        :type bucket: string
+        :param
+
+        :type object: string
+        :param
+
+        :type position: int
+        :param: append start position
+
+        :type fllename: string
+        :param: the name of the read file
+
+        :type content_type: string
+        :param: the object content type that supported by HTTP
+
+        :type headers: dict
+        :param: HTTP header
+
+        Returns:
+            HTTP Response
+        '''
+        params = {}
+        params['append'] = ''
+        params['position'] = str(position)
+
+        if not headers:
+            headers = {}
+        if not content_type:
+            content_type = get_content_type_by_filename(object)
+        if not headers.has_key('Content-Type') and not headers.has_key('content-type'):
+            headers['Content-Type'] = content_type
+        fp = open(filename, 'rb')
+        res = self.post_object_from_fp(bucket, object, fp, content_type, headers, params)
+        fp.close()
+        return res
+
+    def post_object_from_file(self, bucket, object, filename, content_type='', headers=None, params=None):
+        '''
+        post object into bucket, the content of object is read from file
+
+        :type bucket: string
+        :param
+
+        :type object: string
+        :param
+
+        :type fllename: string
+        :param: the name of the read file
+
+        :type content_type: string
+        :param: the object content type that supported by HTTP
+
+        :type headers: dict
+        :param: HTTP header
+
+        Returns:
+            HTTP Response
+        '''
+        fp = open(filename, 'rb')
+        if not content_type:
+            content_type = get_content_type_by_filename(filename)
+        res = self.post_object_from_fp(bucket, object, fp, content_type, headers, params)
+        fp.close()
+        return res
+
     def view_bar(self, num=1, sum=100):
-        rate = float(num) / float(sum)
-        rate_num = int(rate * 100)
-        print('\r%d%% ' % (rate_num), end=' ')
-        sys.stdout.flush()
+        if sum != 0:
+            rate = float(num) / float(sum)
+            rate_num = int(rate * 100)
+            print '\r%d%% ' % (rate_num),
+            sys.stdout.flush()
 
     def put_object_from_fp(self, bucket, object, fp, content_type=DefaultContentType, headers=None, params=None):
         '''
@@ -674,7 +1064,35 @@ class OssAPI:
         Returns:
             HTTP Response
         '''
-        # logger.debug(str(bucket)+str(object)+str(fp)+str(content_type)+str(headers)+str(params))
+        method = 'PUT'
+        return self._put_or_post_object_from_fp(method, bucket, object, fp, content_type, headers, params)
+    
+    def post_object_from_fp(self, bucket, object, fp, content_type=DefaultContentType, headers=None, params=None):
+        '''
+        Post object into bucket, the content of object is read from file pointer
+
+        :type bucket: string
+        :param
+
+        :type object: string
+        :param
+
+        :type fp: file
+        :param: the pointer of the read file
+
+        :type content_type: string
+        :param: the object content type that supported by HTTP
+
+        :type headers: dict
+        :param: HTTP header
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'POST'
+        return self._put_or_post_object_from_fp(method, bucket, object, fp, content_type, headers, params)
+
+    def _put_or_post_object_from_fp(self, method, bucket, object, fp, content_type=DefaultContentType, headers=None, params=None):
         tmp_object = object
         tmp_headers = {}
         tmp_params = {}
@@ -686,13 +1104,13 @@ class OssAPI:
         fp.seek(os.SEEK_SET, os.SEEK_END)
         filesize = fp.tell()
         fp.seek(os.SEEK_SET)
-        conn = self._open_conn_to_put_object(bucket, object, filesize, content_type, headers, params)
+        conn = self._open_conn_to_put_object(method, bucket, object, filesize, content_type, headers, params)
         totallen = 0
         l = fp.read(self.SendBufferSize)
         retry_times = 0
         while len(l) > 0:
             if retry_times > 100:
-                print("retry too many times")
+                print "reach max retry times: %s" % retry_times
                 raise
             try:
                 conn.send(l)
@@ -705,7 +1123,7 @@ class OssAPI:
                 self.view_bar(totallen, filesize)
             l = fp.read(self.SendBufferSize)
         res = conn.getresponse()
-        if res.status == 301 or res.status == 302:
+        if check_redirect(res):
             self.host = helper_get_host_from_resp(res, bucket)
             return self.put_object_from_fp(bucket, tmp_object, fp, content_type, tmp_headers, tmp_params)
         return res
@@ -767,7 +1185,6 @@ class OssAPI:
                 else:
                     break
             f.close()
-        # TODO: get object with flow
         return res
 
     def delete_object(self, bucket, object, headers=None):
@@ -812,6 +1229,74 @@ class OssAPI:
         params = {}
         return self.http_request(method, bucket, object, headers, body, params)
 
+    def create_link_from_list(self, bucket, object, object_list=None, headers=None, params=None):
+        object_link_msg_xml = create_object_link_msg_xml_by_name(object_list)
+        return self.create_link(bucket, object, object_link_msg_xml, headers, params)
+
+    def create_link(self, bucket, object, object_link_msg_xml, headers=None, params=None):
+        '''
+        Create object link, merge all objects in object_link_msg_xml into one object
+        :type bucket: string
+        :param
+
+        :type object: string
+        :param
+
+        :type object_link_msg_xml: string
+        :param: xml format string, like
+                <CreateObjectLink>
+                    <Part>
+                        <PartNumber>N</PartNumber>
+                        <PartName>objectN</PartName>
+                    </Part>
+                </CreateObjectLink>
+        :type headers: dict
+        :param: HTTP header
+
+        :type params: dict
+        :param: parameters
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'PUT'
+        if not headers:
+            headers = {}
+        if not params:
+            params = {}
+        if not headers.has_key('Content-Type'):
+            content_type = get_content_type_by_filename(object)
+            headers['Content-Type'] = content_type
+        body = object_link_msg_xml
+        params['link'] = ''
+        headers['Content-Length'] = str(len(body))
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def get_link_index(self, bucket, object, headers=None, params=None):
+        '''
+        Get all objects linked
+
+        :type bucket: string
+        :param
+
+        :type object: string
+        :param
+
+        :type headers: dict
+        :param: HTTP header
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'GET'
+        if not headers:
+            headers = {}
+        if not params:
+            params = {}
+        params['link'] = ''
+        body = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
     def post_object_group(self, bucket, object, object_group_msg_xml, headers=None, params=None):
         '''
         Post object group, merge all objects in object_group_msg_xml into one object
@@ -844,7 +1329,7 @@ class OssAPI:
             headers = {}
         if not params:
             params = {}
-        if 'Content-Type' not in headers:
+        if not headers.has_key('Content-Type'):
             content_type = get_content_type_by_filename(object)
             headers['Content-Type'] = content_type
         body = object_group_msg_xml
@@ -926,24 +1411,35 @@ class OssAPI:
             fp.seek(offset)
         if not content_type:
             content_type = get_content_type_by_filename(filename)
-        conn = self._open_conn_to_put_object(bucket, object, partsize, content_type, headers, params)
+        method = 'PUT'
+        conn = self._open_conn_to_put_object(method, bucket, object, partsize, content_type, headers, params)
         left_len = partsize
-        while True:
+        while 1:
             if left_len <= 0:
                 break
             elif left_len < self.SendBufferSize:
                 buffer_content = fp.read(left_len)
             else:
                 buffer_content = fp.read(self.SendBufferSize)
-
             if buffer_content:
-                conn.send(buffer_content)
-
+                retry_times = 0
+                while 1:
+                    if retry_times > 100:
+                        print "reach max retry times: %s" % retry_times
+                        fp.close()
+                        raise
+                    try:
+                        conn.send(buffer_content)
+                        retry_times = 0
+                        break
+                    except:
+                        retry_times += 1
+                        continue
             left_len = left_len - len(buffer_content)
 
         fp.close()
         res = conn.getresponse()
-        if res.status == 301 or res.status == 302:
+        if check_redirect(res):
             self.host = helper_get_host_from_resp(res, bucket)
             return self.put_object_from_file_given_pos(bucket, tmp_object, filename, offset, partsize
 , content_type, tmp_headers, tmp_params)
@@ -951,7 +1447,9 @@ class OssAPI:
 
     def upload_large_file(self, bucket, object, filename, thread_num=10, max_part_num=1000, headers=None):
         '''
-        Upload large file, the content is read from filename. The large file is splitted into many parts. It will        put the many parts into bucket and then merge all the parts into one object.
+        Upload large file, the content is read from filename. 
+        The large file is splitted into many parts. It will put the many parts into bucket 
+        and then merge all the parts into one object.
 
         :type bucket: string
         :param
@@ -967,10 +1465,10 @@ class OssAPI:
 
         :type max_part_num: int
         :param
-
+       
         :type headers: dict
         :param
-
+        
         Returns:
             HTTP Response
 
@@ -979,8 +1477,7 @@ class OssAPI:
         #get part_msg_list
         if not headers:
             headers = {}
-        if isinstance(filename, bytes):
-            filename = filename.decode('utf-8')
+        filename = convert_utf8(filename)
         part_msg_list = split_large_file(filename, object, max_part_num)
         #make sure all the parts are put into same bucket
         if len(part_msg_list) < thread_num and len(part_msg_list) != 0:
@@ -990,14 +1487,14 @@ class OssAPI:
         while(retry_times >= 0):
             try:
                 threadpool = []
-                for i in range(0, thread_num):
+                for i in xrange(0, thread_num):
                     if i == thread_num - 1:
                         end = len(part_msg_list)
                     else:
                         end = i * step + step
                     begin = i * step
-                    oss = OssAPI(self.host, self.access_id, self.secret_access_key)
-                    current = PutObjectGroupWorker(oss, bucket, filename, part_msg_list[begin:end], self.retry_times)
+                    oss = OssAPI(self.host, self.access_id, self.secret_access_key, sts_token=self.sts_token)
+                    current = PutObjectGroupWorker(oss, bucket, filename, part_msg_list[begin:end], retry_times)
                     threadpool.append(current)
                     current.start()
                 for item in threadpool:
@@ -1006,16 +1503,82 @@ class OssAPI:
             except:
                 retry_times = retry_times -1
         if -1 >= retry_times:
-            print("after retry %s, failed, upload large file failed!" % retry_times)
-            return
+            print "after retry %s, failed, upload large file failed!" % retry_times
+            return  
         #get xml string that contains msg of object group
         object_group_msg_xml = create_object_group_msg_xml(part_msg_list)
         content_type = get_content_type_by_filename(filename)
-        if isinstance(content_type, bytes):
-            content_type = content_type.decode('utf-8')
-        if 'Content-Type' not in headers:
+        content_type = convert_utf8(content_type)
+        if not headers.has_key('Content-Type'):
             headers['Content-Type'] = content_type
         return self.post_object_group(bucket, object, object_group_msg_xml, headers)
+
+    def upload_large_file_by_link(self, bucket, object, filename, thread_num=5, max_part_num=50, headers=None):
+        '''
+        Upload large file, the content is read from filename. The large file is splitted into many parts. 
+        all the parts are put into bucket and then merged into one object.
+
+        :type bucket: string
+        :param
+
+        :type object: string
+        :param
+
+        :type fllename: string
+        :param: the name of the read file
+
+        :type thread_num: int
+        :param
+
+        :type max_part_num: int
+        :param
+        
+        :type headers: dict
+        :param
+        
+        Returns:
+            HTTP Response
+
+        '''
+        #split the large file into 100 parts or many parts
+        #get part_msg_list
+        if not headers:
+            headers = {}
+        filename = convert_utf8(filename)
+        part_msg_list = split_large_file(filename, object, max_part_num)
+        #make sure all the parts are put into same bucket
+        if len(part_msg_list) < thread_num and len(part_msg_list) != 0:
+            thread_num = len(part_msg_list)
+        step = len(part_msg_list) / thread_num
+        retry_times = self.retry_times
+        while(retry_times >= 0):
+            try:
+                threadpool = []
+                for i in xrange(0, thread_num):
+                    if i == thread_num - 1:
+                        end = len(part_msg_list)
+                    else:
+                        end = i * step + step
+                    begin = i * step
+                    oss = OssAPI(self.host, self.access_id, self.secret_access_key, sts_token=self.sts_token)
+                    current = PutObjectLinkWorker(oss, bucket, filename, part_msg_list[begin:end], self.retry_times)
+                    threadpool.append(current)
+                    current.start()
+                for item in threadpool:
+                    item.join()
+                break
+            except:
+                retry_times = retry_times -1
+        if -1 >= retry_times:
+            print "after retry %s, failed, upload large file failed!" % retry_times
+            return
+        #get xml string that contains msg of object link 
+        object_link_msg_xml = create_object_link_msg_xml(part_msg_list)
+        content_type = get_content_type_by_filename(filename)
+        content_type = convert_utf8(content_type)
+        if not headers.has_key('Content-Type'):
+            headers['Content-Type'] = content_type
+        return self.create_link(bucket, object, object_link_msg_xml, headers)
 
     def copy_object(self, source_bucket, source_object, target_bucket, target_object, headers=None):
         '''
@@ -1041,9 +1604,8 @@ class OssAPI:
         '''
         if not headers:
             headers = {}
-        if isinstance(source_object, str):
-            source_object = source_object.encode('utf-8')
-        source_object = urllib.parse.quote(source_object)
+        source_object = convert_utf8(source_object)
+        source_object = oss_quote(source_object)
         headers['x-oss-copy-source'] = "/%s/%s" % (source_bucket, source_object)
         method = 'PUT'
         body = ''
@@ -1071,34 +1633,43 @@ class OssAPI:
         '''
         if not params:
             params = {}
+        if not headers:
+            headers = {}
         method = 'POST'
         body = ''
         params['uploads'] = ''
+        if isinstance(headers, dict) and not headers.has_key('Content-Type'):
+            content_type = get_content_type_by_filename(object)
+            headers['Content-Type'] = content_type
         return self.http_request(method, bucket, object, headers, body, params)
 
-    def get_all_parts(self, bucket, object, upload_id, max_parts=None, part_number_marker=None):
+    def get_all_parts(self, bucket, object, upload_id, max_parts=None, part_number_marker=None, headers=None):
         '''
         List all upload parts of given upload_id
         :type bucket: string
         :param
-
+        
         :type object: string
         :param
-
+        
         :type upload_id: string
         :param
-
+       
         :type max_parts: int
-        :param
+        :param 
 
         :type part_number_marker: string
         :param
+        
+        :type headers: dict
+        :param: HTTP header
 
         Returns:
             HTTP Response
         '''
         method = 'GET'
-        headers = {}
+        if not headers:
+            headers = {}
         body = ''
         params = {}
         params['uploadId'] = upload_id
@@ -1108,7 +1679,7 @@ class OssAPI:
             params['part-number-marker'] = part_number_marker
         return self.http_request(method, bucket, object, headers, body, params)
 
-    def get_all_multipart_uploads(self, bucket, delimiter=None, max_uploads=None, key_marker=None, prefix=None, upload_id_marker=None, headers=None):
+    def get_all_multipart_uploads(self, bucket, delimiter=None, max_uploads=None, key_marker=None, prefix=None, upload_id_marker=None, headers=None, encoding_type = ''):
         '''
         List all upload_ids and their parts
         :type bucket: string
@@ -1150,12 +1721,14 @@ class OssAPI:
             params['prefix'] = prefix
         if upload_id_marker:
             params['upload-id-marker'] = upload_id_marker
+        if encoding_type:
+            params['encoding-type'] = encoding_type
         return self.http_request(method, bucket, object, headers, body, params)
 
     def upload_part(self, bucket, object, filename, upload_id, part_number, headers=None, params=None):
         '''
         Upload the content of filename as one part of given upload_id
-
+        
         :type bucket: string
         :param
 
@@ -1168,7 +1741,7 @@ class OssAPI:
         :type upload_id: string
         :param
 
-        :type part_number: int
+        :type part_number: int 
         :param
 
         :type headers: dict
@@ -1190,7 +1763,7 @@ class OssAPI:
     def upload_part_from_string(self, bucket, object, data, upload_id, part_number, headers=None, params=None):
         '''
         Upload the content of string as one part of given upload_id
-
+        
         :type bucket: string
         :param
 
@@ -1203,7 +1776,7 @@ class OssAPI:
         :type upload_id: string
         :param
 
-        :type part_number: int
+        :type part_number: int 
         :param
 
         :type headers: dict
@@ -1220,8 +1793,57 @@ class OssAPI:
         params['partNumber'] = part_number
         params['uploadId'] = upload_id
         content_type = ''
-        fp = io.StringIO(data)
+        fp = StringIO.StringIO(data)
         return self.put_object_from_fp(bucket, object, fp, content_type, headers, params)
+
+    def copy_object_as_part(self, source_bucket, source_object, target_bucket, 
+            target_object, upload_id, part_number, headers=None, params=None):
+        '''
+        Upload a part with data copy from srouce object in source bucket 
+        
+        :type source_bucket: string
+        :param
+
+        :type source_object: string
+        :param
+
+        :type target_bucket: string
+        :param
+
+        :type target_object: string
+        :param
+
+        :type data: string
+        :param
+
+        :type upload_id: string
+        :param
+
+        :type part_number: int 
+        :param
+
+        :type headers: dict
+        :param: HTTP header
+
+        :type params: dict
+        :param: HTTP header
+
+        Returns:
+            HTTP Response
+        '''
+        if not headers:
+            headers = {}
+        if not params:
+            params = {}
+        source_object = convert_utf8(source_object)
+        source_object = oss_quote(source_object)
+        method = 'PUT'
+        params['partNumber'] = part_number
+        params['uploadId'] = upload_id
+        headers['x-oss-copy-source'] = "/%s/%s" % (source_bucket, source_object)
+        body = ''
+        return self.http_request(method, target_bucket, target_object, headers, body, params)
+
 
     def complete_upload(self, bucket, object, upload_id, part_msg_xml, headers=None, params=None):
         '''
@@ -1232,7 +1854,7 @@ class OssAPI:
 
         :type object: string
         :param
-
+        
         :type upload_id: string
         :param
 
@@ -1256,9 +1878,12 @@ class OssAPI:
         body = part_msg_xml
         headers['Content-Length'] = str(len(body))
         params['uploadId'] = upload_id
-        if 'Content-Type' not in headers:
+        if not headers.has_key('Content-Type'):
             content_type = get_content_type_by_filename(object)
             headers['Content-Type'] = content_type
+        if not headers.has_key('Content-MD5'):
+            base64md5 = get_string_base64_md5(body) 
+            headers['Content-MD5'] = base64md5
         return self.http_request(method, bucket, object, headers, body, params)
 
     def cancel_upload(self, bucket, object, upload_id, headers=None, params=None):
@@ -1285,13 +1910,12 @@ class OssAPI:
         if not params:
             params = {}
         method = 'DELETE'
-        if isinstance(upload_id, str):
-            upload_id = upload_id.encode('utf-8')
+        upload_id = convert_utf8(upload_id)
         params['uploadId'] = upload_id
         body = ''
         return self.http_request(method, bucket, object, headers, body, params)
 
-    def multi_upload_file(self, bucket, object, filename, upload_id='', thread_num=10, max_part_num=10000, headers=None, params=None):
+    def multi_upload_file(self, bucket, object, filename, upload_id='', thread_num=10, max_part_num=10000, headers=None, params=None, debug=False, check_md5=False):
         '''
         Upload large file, the content is read from filename. The large file is splitted into many parts. It will        put the many parts into bucket and then merge all the parts into one object.
 
@@ -1306,7 +1930,7 @@ class OssAPI:
 
         :type upload_id: string
         :param
-
+    
         :type thread_num: int
         :param
 
@@ -1322,9 +1946,15 @@ class OssAPI:
         Returns:
             HTTP Response
         '''
+        tmp_headers = {}
+        if headers and isinstance(headers, dict):
+            tmp_headers = headers.copy()
+        if not tmp_headers.has_key('Content-Type'):
+            content_type = get_content_type_by_filename(filename)
+            tmp_headers['Content-Type'] = content_type
         #get init upload_id
         if not upload_id:
-            res = self.init_multi_upload(bucket, object, headers, params)
+            res = self.init_multi_upload(bucket, object, tmp_headers, params)
             body = res.read()
             if res.status == 200:
                 h = GetInitUploadIdXml(body)
@@ -1334,56 +1964,9 @@ class OssAPI:
                 raise Exception("%s, %s" %(res.status, err.msg))
         if not upload_id:
             raise Exception("-1, Cannot get upload id.")
-        #split the large file into 1000 parts or many parts
-        #get part_msg_list
-        if isinstance(filename, str):
-            filename = filename.encode('utf-8')
-        part_msg_list = split_large_file(filename, object, max_part_num)
-        # logger = getlogger(self.debug)
-        # logger.info("bucket:%s, object:%s, upload_id is: %s, split_number:%d" % (bucket, object, upload_id, len(part_msg_list)))
 
-        #make sure all the parts are put into same bucket
-        if len(part_msg_list) < thread_num and len(part_msg_list) != 0:
-            thread_num = len(part_msg_list)
-        step = len(part_msg_list) / thread_num
-
-        #list part to get a map
-        upload_retry_times = self.retry_times
-        while(upload_retry_times >= 0):
-            uploaded_part_map = {}
-            oss = OssAPI(self.host, self.access_id, self.secret_access_key)
-            uploaded_part_map = get_part_map(oss, bucket, object, upload_id)
-            retry_times = self.retry_times
-            while(retry_times >= 0):
-                threadpool = []
-                try:
-                    for i in range(0, thread_num):
-                        if i == thread_num - 1:
-                            end = len(part_msg_list)
-                        else:
-                            end = i * step + step
-                        begin = i * step
-                        oss = OssAPI(self.host, self.access_id, self.secret_access_key)
-                        current = UploadPartWorker(oss, bucket, object, upload_id, filename, part_msg_list[begin:end], uploaded_part_map, self.retry_times)
-                        threadpool.append(current)
-                        current.start()
-                    for item in threadpool:
-                        item.join()
-                    break
-                except:
-                    retry_times -= 1
-            if -1 >= retry_times:
-                raise Exception("-2, after retry %s, failed, multi upload part failed! upload_id:%s" % (self.retry_times, upload_id))
-            #get xml string that contains msg of part
-            part_msg_xml = create_part_xml(part_msg_list)
-            #complete upload
-            res = self.complete_upload(bucket, object, upload_id, part_msg_xml, headers, params)
-            if res.status == 200:
-                break
-            upload_retry_times -= 1
-        if upload_retry_times < 0:
-            raise Exception("-3, after retry %s, failed, multi upload file failed! upload_id:%s" % (self.retry_times, upload_id))
-        return res
+        oss = OssAPI(self.host, self.access_id, self.secret_access_key, sts_token=self.sts_token)
+        return multi_upload_file2(oss, bucket, object, filename, upload_id, thread_num, max_part_num, self.retry_times, headers, params, debug, check_md5)
 
     def delete_objects(self, bucket, object_list=None, headers=None, params=None):
         '''
@@ -1435,9 +2018,7 @@ class OssAPI:
         body = object_list_xml
         headers['Content-Length'] = str(len(body))
         params['delete'] = ''
-        base64md5 = base64.encodestring(md5.new(body).digest())
-        if base64md5[-1] == '\n':
-            base64md5 = base64md5[0:-1]
+        base64md5 = get_string_base64_md5(body) 
         headers['Content-MD5'] = base64md5
         return self.http_request(method, bucket, object, headers, body, params)
 
@@ -1455,9 +2036,31 @@ class OssAPI:
         get_instance = GetAllObjects()
         marker_input = ''
         object_list = []
-        oss = OssAPI(self.host, self.access_id, self.secret_access_key)
+        oss = OssAPI(self.host, self.access_id, self.secret_access_key, sts_token=self.sts_token)
         (object_list, marker_output) = get_instance.get_object_in_bucket(oss, bucket, marker_input, prefix)
         return object_list
+    
+    def list_objects_dirs(self, bucket, prefix='', delimiter=''):
+        '''
+        :type bucket: string
+        :param:
+
+        :type prefix: string
+        :param:
+        
+        :type prefix: delimiter
+        :param:
+
+        Returns:
+            a list that contains the objects in bucket with prefix
+        '''
+        get_instance = GetAllObjects()
+        marker_input = ''
+        object_list = []
+        dir_list = []
+        oss = OssAPI(self.host, self.access_id, self.secret_access_key, sts_token=self.sts_token)
+        (object_list, dir_list) = get_instance.get_all_object_dir_in_bucket(oss, bucket, marker_input, prefix, delimiter)
+        return (object_list, dir_list)
 
     def batch_delete_objects(self, bucket, object_list=None):
         '''
@@ -1482,7 +2085,7 @@ class OssAPI:
         return False
 
     def get_object_info(self, bucket, object, headers=None, params=None):
-        '''
+        ''' 
         Get object information
         :type bucket: string
         :param:
@@ -1506,4 +2109,145 @@ class OssAPI:
         method = 'GET'
         body = ''
         params['objectInfo'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def options(self, bucket, object='', headers=None, params=None):
+        ''' 
+        Options object to determine if user can send the actual HTTP request
+        :type bucket: string
+        :param:
+
+        :type object: string
+        :param:
+
+        :type headers: dict
+        :param: HTTP header
+
+        :type params: dict
+        :param: the parameters that put in the url address as query string
+
+        Returns:
+            HTTP Response
+        '''
+        if not headers:
+            headers = {}
+        if not params:
+            params = {}
+        method = 'OPTIONS'
+        body = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def put_referer(self, bucket, allow_empty_referer=True, referer_list=None):
+        '''
+        Put bucket referer
+
+        :type bucket: string
+        :param
+
+        :type allow_empty_referer: boolean
+        :param
+
+        :type referer_list: list
+        :param
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'PUT'
+        object = ''
+        if allow_empty_referer == True:
+            allow = "true"
+        elif allow_empty_referer == False:
+            allow = "false" 
+        else:
+            allow = "true"
+        referer_list_string = ''
+        if not referer_list:
+            referer_list_string = '<Referer></Referer>'
+        elif referer_list and isinstance(referer_list, list):
+            for i in referer_list:
+                referer_list_string += '<Referer>%s</Referer>' % i.strip()
+        else:
+            referer_list_string = '<Referer>%s</Referer>' % referer_list
+        body = '<RefererConfiguration><AllowEmptyReferer>%s</AllowEmptyReferer><RefererList>%s</RefererList></RefererConfiguration>' % (allow, referer_list_string)
+        params = {'referer':''}
+        headers = {}
+        headers['Content-Length'] = str(len(body))
+        base64md5 = get_string_base64_md5(body)
+        headers['Content-MD5'] = base64md5
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def get_referer(self, bucket):
+        '''
+        Get bucket referer
+
+        :type bucket: string
+        :param
+
+        Returns:
+            HTTP Response
+        '''
+        method = 'GET'
+        object = ''
+        body = ''
+        params = {'referer':''}
+        headers = {}
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def put_object_acl(self, bucket, object, acl, headers=None, params=None):
+        ''' 
+        Put object acl
+        :type bucket: string
+        :param:
+
+        :type object: string
+        :param:
+
+        :type acl: string
+        :param:
+
+        :type headers: dict
+        :param: HTTP header
+
+        :type params: dict
+        :param: the parameters that put in the url address as query string
+
+        Returns:
+            HTTP Response
+        '''
+        if not headers:
+            headers = {}
+        if not params:
+            params = {}
+        headers['x-oss-object-acl'] = acl
+        method = 'PUT'
+        body = ''
+        params['acl'] = ''
+        return self.http_request(method, bucket, object, headers, body, params)
+
+    def get_object_acl(self, bucket, object, headers=None, params=None):
+        ''' 
+        Get object acl
+        :type bucket: string
+        :param:
+
+        :type object: string
+        :param:
+
+        :type headers: dict
+        :param: HTTP header
+
+        :type params: dict
+        :param: the parameters that put in the url address as query string
+
+        Returns:
+            HTTP Response
+        '''
+        if not headers:
+            headers = {}
+        if not params:
+            params = {}
+        method = 'GET'
+        body = ''
+        params['acl'] = ''
         return self.http_request(method, bucket, object, headers, body, params)
